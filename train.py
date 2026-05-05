@@ -72,6 +72,10 @@ def build_imagenet_split(class_dirs, out_root: Path, val_frac=0.15, test_frac=0.
     image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
     random.seed(seed)
 
+    #skip classes wtih fewer than 5 images
+    class_dirs = [d for d in class_dirs if len(list(d.iterdir())) >= 5]
+    print(f"[info] After filtering sparse classes: {len(class_dirs)} remain")
+
     if out_root.exists():
         print(f"[info] {out_root} already exists – skipping split.")
         return
@@ -106,19 +110,25 @@ def build_imagenet_split(class_dirs, out_root: Path, val_frac=0.15, test_frac=0.
 # ──────────────────────────────────────────────
 
 def train(data_dir: Path, epochs: int, imgsz: int, batch: int, project: str):
-    """Fine-tune YOLOv8n-cls on our dataset."""
+    train_dir = data_dir / "train"
+    class_dirs = sorted([d for d in train_dir.iterdir() if d.is_dir()])
+    counts = [len(list(d.iterdir())) for d in class_dirs]
+    total = sum(counts)
+    # inverse frequency weighting
+    weights = [total / (len(counts) * c) if c > 0 else 0.0 for c in counts]
+    print(f"[info] Weight range: {min(weights):.2f} – {max(weights):.2f}")
 
     print("\n[info] Starting YOLOv8n-cls training …")
-    model = YOLO("yolov8n-cls.pt")   # downloads ~6 MB pretrained weights automatically
+    model = YOLO("yolov8n-cls.pt")
 
     results = model.train(
-        data=str(data_dir),           # folder with train/ val/ sub-dirs
+        data=str(data_dir),
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
         project=project,
         name="traffic_sign_cls",
-        patience=10,                  # early stopping
+        patience=15,
         optimizer="AdamW",
         lr0=1e-3,
         weight_decay=5e-4,
@@ -128,7 +138,7 @@ def train(data_dir: Path, epochs: int, imgsz: int, batch: int, project: str):
     )
 
     best_weights = Path(project) / "traffic_sign_cls" / "weights" / "best.pt"
-    print(f"\n[info] Training done. Best weights saved to: {best_weights}")
+    print(f"\n[info] Training done. Best weights: {best_weights}")
     return best_weights
 
 
@@ -153,7 +163,7 @@ def main():
     parser.add_argument("--epochs",    type=int, default=30)
     parser.add_argument("--imgsz",     type=int, default=224)
     parser.add_argument("--batch",     type=int, default=32)
-    parser.add_argument("--project",   type=str, default="runs/classify")
+    parser.add_argument("--project",   type=str, default="runs")
     parser.add_argument("--export_onnx", action="store_true", help="Export best model to ONNX after training")
     args = parser.parse_args()
 

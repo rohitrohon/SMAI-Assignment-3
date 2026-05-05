@@ -1,0 +1,38 @@
+# Data files - exclude all data and training data
+data/
+*.zip
+*.tar
+*.tar.gz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model weights (optional - uncomment if you want to exclude)
+# *.pt
+
+# Training logs and outputs
+runs/
+reports/

@@ -39,7 +39,7 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 st.sidebar.title("⚙️ Settings")
 
-DEFAULT_WEIGHTS = "runs/classify/traffic_sign_cls/weights/best.pt"
+DEFAULT_WEIGHTS = "runs/traffic_sign_cls/weights/best.pt"
 weights_path = st.sidebar.text_input("Model weights path", value=DEFAULT_WEIGHTS)
 conf_threshold = st.sidebar.slider("Confidence threshold", 0.1, 1.0, 0.5, 0.05)
 top_k = st.sidebar.slider("Show top-K predictions", 1, 5, 3)

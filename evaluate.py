@@ -125,7 +125,7 @@ def run_eval(weights: str, test_dir: str, out_dir: str, imgsz: int = 224, top_k:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights",  type=str, default="runs/classify/traffic_sign_cls/weights/best.pt")
+    parser.add_argument("--weights",  type=str, default="runs/traffic_sign_cls/weights/best.pt")
     parser.add_argument("--test_dir", type=str, default="data/split/test")
     parser.add_argument("--out_dir",  type=str, default="reports")
     parser.add_argument("--imgsz",    type=int, default=224)
