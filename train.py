@@ -1,21 +1,8 @@
 """
-train.py — Indian Traffic Sign Classifier (T5.1)
--------------------------------------------------
-Uses YOLOv8n-cls (classification head) to train on the Kaggle dataset:
-  sarangdilipjodh/indian-traffic-signs-prediction85-classes
+Training pipeline for the Indian Traffic Sign Classifier.
 
-Steps:
-  1. Download dataset via kaggle API (or accept a local zip path)
-  2. Re-organise folder structure into ImageNet-style (train/ val/ test/)
-  3. Train YOLOv8n-cls for N epochs
-  4. Save best weights + export to ONNX for portability
-
-Usage:
-  python train.py --data_zip path/to/archive.zip --epochs 30 --imgsz 224
-  OR (if you have kaggle CLI set up):
-  python train.py --kaggle --epochs 30
-
-Author: <your name>
+Downloads the Kaggle dataset (or uses a local zip), splits it into
+train/val/test folders, and fine-tunes YOLOv8n-cls.
 """
 
 import argparse
@@ -27,14 +14,11 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-# ──────────────────────────────────────────────
-# 1.  Helpers
-# ──────────────────────────────────────────────
 
 def download_via_kaggle(dest: Path):
-    """Pull the dataset with the kaggle CLI."""
-    print("[info] Downloading dataset from Kaggle …")
+    print("[info] Downloading dataset from Kaggle...")
     os.system(
         f"kaggle datasets download -d sarangdilipjodh/indian-traffic-signs-prediction85-classes "
         f"-p {dest} --unzip"
@@ -42,59 +26,48 @@ def download_via_kaggle(dest: Path):
 
 
 def unzip(zip_path: Path, dest: Path):
-    print(f"[info] Unzipping {zip_path} → {dest}")
+    print(f"[info] Unzipping {zip_path} -> {dest}")
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(dest)
 
 
 def find_class_dirs(root: Path):
-    """
-    Walk root and return a list of directories that look like class folders
-    (i.e. they contain image files directly).
-    """
-    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    """Return directories under root that contain at least one image file."""
     class_dirs = []
     for p in sorted(root.rglob("*")):
         if p.is_dir():
-            images = [f for f in p.iterdir() if f.suffix.lower() in image_exts]
-            if images:
+            has_images = any(f.suffix.lower() in IMAGE_EXTS for f in p.iterdir())
+            if has_images:
                 class_dirs.append(p)
     return class_dirs
 
 
 def build_imagenet_split(class_dirs, out_root: Path, val_frac=0.15, test_frac=0.10, seed=42):
-    """
-    Re-organise raw class folders into:
-        out_root/train/<class>/…
-        out_root/val/<class>/…
-        out_root/test/<class>/…
-    """
-    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    """Split raw class folders into train/val/test with ImageNet-style layout."""
     random.seed(seed)
 
-    #skip classes wtih fewer than 5 images
     class_dirs = [d for d in class_dirs if len(list(d.iterdir())) >= 5]
     print(f"[info] After filtering sparse classes: {len(class_dirs)} remain")
 
     if out_root.exists():
-        print(f"[info] {out_root} already exists – skipping split.")
+        print(f"[info] {out_root} already exists, skipping split.")
         return
 
-    print(f"[info] Building train/val/test split in {out_root} …")
+    print(f"[info] Building train/val/test split in {out_root}...")
     for cls_dir in class_dirs:
         cls_name = cls_dir.name
-        images = sorted([f for f in cls_dir.iterdir() if f.suffix.lower() in image_exts])
+        images = sorted(f for f in cls_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS)
         random.shuffle(images)
 
         n = len(images)
-        n_val  = max(1, int(n * val_frac))
+        n_val = max(1, int(n * val_frac))
         n_test = max(1, int(n * test_frac))
         n_train = n - n_val - n_test
 
         splits = {
             "train": images[:n_train],
-            "val":   images[n_train: n_train + n_val],
-            "test":  images[n_train + n_val:],
+            "val": images[n_train:n_train + n_val],
+            "test": images[n_train + n_val:],
         }
         for split, files in splits.items():
             dest_dir = out_root / split / cls_name
@@ -105,23 +78,19 @@ def build_imagenet_split(class_dirs, out_root: Path, val_frac=0.15, test_frac=0.
     print(f"[info] Split complete. Classes: {len(class_dirs)}")
 
 
-# ──────────────────────────────────────────────
-# 2.  Training
-# ──────────────────────────────────────────────
-
 def train(data_dir: Path, epochs: int, imgsz: int, batch: int, project: str):
+    """Fine-tune YOLOv8n-cls on the prepared dataset."""
     train_dir = data_dir / "train"
-    class_dirs = sorted([d for d in train_dir.iterdir() if d.is_dir()])
+    class_dirs = sorted(d for d in train_dir.iterdir() if d.is_dir())
     counts = [len(list(d.iterdir())) for d in class_dirs]
     total = sum(counts)
-    # inverse frequency weighting
     weights = [total / (len(counts) * c) if c > 0 else 0.0 for c in counts]
-    print(f"[info] Weight range: {min(weights):.2f} – {max(weights):.2f}")
+    print(f"[info] Weight range: {min(weights):.2f} - {max(weights):.2f}")
 
-    print("\n[info] Starting YOLOv8n-cls training …")
+    print("\n[info] Starting YOLOv8n-cls training...")
     model = YOLO("yolov8n-cls.pt")
 
-    results = model.train(
+    model.train(
         data=str(data_dir),
         epochs=epochs,
         imgsz=imgsz,
@@ -143,34 +112,29 @@ def train(data_dir: Path, epochs: int, imgsz: int, batch: int, project: str):
 
 
 def export_onnx(weights_path: Path, imgsz: int):
-    print("[info] Exporting to ONNX …")
+    """Export trained weights to ONNX format."""
+    print("[info] Exporting to ONNX...")
     model = YOLO(str(weights_path))
     model.export(format="onnx", imgsz=imgsz, dynamic=True)
-    onnx_path = weights_path.with_suffix(".onnx")
-    print(f"[info] ONNX model: {onnx_path}")
+    print(f"[info] ONNX model: {weights_path.with_suffix('.onnx')}")
 
-
-# ──────────────────────────────────────────────
-# 3.  Entry point
-# ──────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Train Indian traffic sign classifier")
-    parser.add_argument("--kaggle",    action="store_true",  help="Download dataset via kaggle CLI")
-    parser.add_argument("--data_zip",  type=str, default=None, help="Path to downloaded Kaggle zip")
-    parser.add_argument("--raw_dir",   type=str, default="data/raw",   help="Where raw data lands")
+    parser.add_argument("--kaggle", action="store_true", help="Download dataset via kaggle CLI")
+    parser.add_argument("--data_zip", type=str, default=None, help="Path to downloaded Kaggle zip")
+    parser.add_argument("--raw_dir", type=str, default="data/raw", help="Where raw data lands")
     parser.add_argument("--split_dir", type=str, default="data/split", help="ImageNet-style split output")
-    parser.add_argument("--epochs",    type=int, default=30)
-    parser.add_argument("--imgsz",     type=int, default=224)
-    parser.add_argument("--batch",     type=int, default=32)
-    parser.add_argument("--project",   type=str, default="runs")
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--imgsz", type=int, default=320)
+    parser.add_argument("--batch", type=int, default=32)
+    parser.add_argument("--project", type=str, default="runs")
     parser.add_argument("--export_onnx", action="store_true", help="Export best model to ONNX after training")
     args = parser.parse_args()
 
-    raw_dir   = Path(args.raw_dir)
+    raw_dir = Path(args.raw_dir)
     split_dir = Path(args.split_dir)
 
-    # ── Step 1: get the data ──────────────────
     if args.kaggle:
         raw_dir.mkdir(parents=True, exist_ok=True)
         download_via_kaggle(raw_dir)
@@ -182,23 +146,20 @@ def main():
             print("[error] Provide --kaggle or --data_zip <path>. Exiting.")
             return
 
-    # ── Step 2: find class folders & build split ──
     class_dirs = find_class_dirs(raw_dir)
     if not class_dirs:
-        print(f"[error] No image-containing sub-folders found under {raw_dir}. Check extraction path.")
+        print(f"[error] No image-containing sub-folders found under {raw_dir}.")
         return
     print(f"[info] Found {len(class_dirs)} class folders.")
 
     build_imagenet_split(class_dirs, split_dir, val_frac=0.15, test_frac=0.10)
 
-    # ── Step 3: train ─────────────────────────
     best_weights = train(split_dir, args.epochs, args.imgsz, args.batch, args.project)
 
-    # ── Step 4 (optional): export ─────────────
     if args.export_onnx and best_weights.exists():
         export_onnx(best_weights, args.imgsz)
 
-    print("\n✅  All done! Use app.py for inference.")
+    print("\nAll done! Use app.py for inference.")
 
 
 if __name__ == "__main__":
